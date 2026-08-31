@@ -1,0 +1,21 @@
+{
+  "title": "出包魔法师",
+  "boardImageUrl": "/board-reference.png",
+  "cardBackImageUrl": "/content/card-back.png",
+  "characters": {
+    "red": { "imageUrl": "/content/characters/red.png" },
+    "blue": { "imageUrl": "/content/characters/blue.png" },
+    "green": { "imageUrl": "/content/characters/green.png" },
+    "purple": { "imageUrl": "/content/characters/purple.png" }
+  },
+  "spells": {
+    "1": { "name": "龙", "description": "掷骰，所有其他玩家失去骰值生命；喊错时自己承受骰值", "imageUrl": "/content/spells/1.png" },
+    "2": { "name": "幽灵", "description": "其他玩家失去 1 点，自己恢复 1 点", "imageUrl": "/content/spells/2.png" },
+    "3": { "name": "独角兽", "description": "掷骰并恢复骰值生命", "imageUrl": "/content/spells/3.png" },
+    "4": { "name": "猫头鹰", "description": "选择并查看一枚不能施放的秘密咒语", "imageUrl": "/content/spells/4.png" },
+    "5": { "name": "闪电", "description": "左右邻座各失去 1 点；两人局累计 2 点", "imageUrl": "/content/spells/5.png" },
+    "6": { "name": "冰块", "description": "左邻失去 1 点", "imageUrl": "/content/spells/6.png" },
+    "7": { "name": "火球", "description": "右邻失去 1 点", "imageUrl": "/content/spells/7.png" },
+    "8": { "name": "药水", "description": "自己恢复 1 点生命", "imageUrl": "/content/spells/8.png" }
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "title": "你的游戏名称",
+  "logoImageUrl": "/content/logo.png",
+  "boardImageUrl": "/content/board.png",
+  "cardBackImageUrl": "/content/card-back.png",
+  "characters": {
+    "red": { "name": "角色一", "imageUrl": "/content/characters/red.png" },
+    "blue": { "name": "角色二", "imageUrl": "/content/characters/blue.png" },
+    "green": { "name": "角色三", "imageUrl": "/content/characters/green.png" },
+    "purple": { "name": "角色四", "imageUrl": "/content/characters/purple.png" }
+  },
+  "spells": {
+    "1": { "name": "一号牌名", "description": "一号说明", "imageUrl": "/content/spells/1.png" },
+    "2": { "name": "二号牌名", "description": "二号说明", "imageUrl": "/content/spells/2.png" },
+    "3": { "name": "三号牌名", "description": "三号说明", "imageUrl": "/content/spells/3.png" },
+    "4": { "name": "四号牌名", "description": "四号说明", "imageUrl": "/content/spells/4.png" },
+    "5": { "name": "五号牌名", "description": "五号说明", "imageUrl": "/content/spells/5.png" },
+    "6": { "name": "六号牌名", "description": "六号说明", "imageUrl": "/content/spells/6.png" },
+    "7": { "name": "七号牌名", "description": "七号说明", "imageUrl": "/content/spells/7.png" },
+    "8": { "name": "八号牌名", "description": "八号说明", "imageUrl": "/content/spells/8.png" }
+  }
+}
