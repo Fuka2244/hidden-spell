@@ -16,6 +16,8 @@ const reconnectStopped = ref(false);
 let socket: WebSocket | null = null;
 let reconnectTimer: number | undefined;
 let stableTimer: number | undefined;
+let leaveTimer: number | undefined;
+let leaveCommandId: string | null = null;
 let reconnectAttempt = 0;
 let voluntarilyClosed = false;
 const MAX_RECONNECT_ATTEMPTS = 6;
@@ -34,6 +36,7 @@ onBeforeUnmount(() => {
   voluntarilyClosed = true;
   if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer);
   if (stableTimer !== undefined) window.clearTimeout(stableTimer);
+  if (leaveTimer !== undefined) window.clearTimeout(leaveTimer);
   socket?.close();
 });
 
@@ -142,7 +145,11 @@ function clearExpiredSession(): void {
   voluntarilyClosed = true;
   if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer);
   if (stableTimer !== undefined) window.clearTimeout(stableTimer);
+  if (leaveTimer !== undefined) window.clearTimeout(leaveTimer);
   reconnectTimer = stableTimer = undefined;
+  leaveTimer = undefined;
+  leaveCommandId = null;
+  busy.value = false;
   reconnectAttempt = 0;
   reconnectStopped.value = false;
   socket?.close();
@@ -170,6 +177,17 @@ function scheduleReconnect(): void {
 }
 
 function receive(message: ServerMessage): void {
+  if (message.type === "ACK" && message.commandId === leaveCommandId) {
+    finishLeave();
+    return;
+  }
+  if (message.type === "ERROR" && message.commandId === leaveCommandId) {
+    if (leaveTimer !== undefined) window.clearTimeout(leaveTimer);
+    leaveTimer = undefined;
+    leaveCommandId = null;
+    busy.value = false;
+    voluntarilyClosed = false;
+  }
   if (message.type === "STATE") roomView.value = message.payload;
   if (message.type === "ERROR") error.value = `${message.message}（${message.code}）`;
 }
@@ -191,27 +209,51 @@ function createCommandId(): string {
 function send(
   type: "SELECT_CHARACTER" | "SET_READY" | "START_GAME" | "CAST_SPELL" | "CHOOSE_SECRET" | "END_TURN" | "NEXT_ROUND" | "LEAVE_ROOM" | "SYNC",
   payload?: unknown
-): void {
+): string | undefined {
   if (!socket || socket.readyState !== WebSocket.OPEN) {
     error.value = "正在重新连接服务器";
     return;
   }
+  const commandId = createCommandId();
   socket.send(JSON.stringify({
-    commandId: createCommandId(),
+    commandId,
     type,
     ...(payload === undefined ? {} : { payload })
   }));
+  return commandId;
 }
 
 function leaveRoom(): void {
+  if (busy.value) return;
   if (!window.confirm(roomView.value?.game ? "退出将立即认输，确定吗？" : "确定退出房间吗？")) return;
-  send("LEAVE_ROOM");
+  const commandId = send("LEAVE_ROOM");
+  if (!commandId) return;
+  leaveCommandId = commandId;
+  busy.value = true;
   voluntarilyClosed = true;
+  leaveTimer = window.setTimeout(() => {
+    if (leaveCommandId !== commandId) return;
+    leaveCommandId = null;
+    leaveTimer = undefined;
+    busy.value = false;
+    voluntarilyClosed = false;
+    error.value = "退出未得到服务器确认，正在恢复连接；请稍后重试";
+    void connect();
+  }, 5_000);
+}
+
+function finishLeave(): void {
   if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer);
   if (stableTimer !== undefined) window.clearTimeout(stableTimer);
-  reconnectTimer = stableTimer = undefined;
-  socket?.close();
+  if (leaveTimer !== undefined) window.clearTimeout(leaveTimer);
+  reconnectTimer = stableTimer = leaveTimer = undefined;
+  leaveCommandId = null;
+  const previous = socket;
   socket = null;
+  previous?.close();
+  connected.value = false;
+  busy.value = false;
+  error.value = "";
   roomView.value = null;
   session.value = null;
   clearSession();

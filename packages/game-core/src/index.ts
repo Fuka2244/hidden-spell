@@ -160,18 +160,25 @@ export class RoomEngine {
   }
 
   static join(state: RoomState, identity: PlayerIdentity, now: number): RoomState {
-    requireStatus(state, "WAITING");
-    if (state.players.length >= ROOM_LIMITS.maxPlayers) {
+    const room = state.status === "FINISHED" && state.players.length === 0 && !state.game
+      ? { ...state, status: "WAITING" as const }
+      : state;
+    requireStatus(room, "WAITING");
+    if (room.players.length >= ROOM_LIMITS.maxPlayers) {
       throw new RoomRuleError("ROOM_FULL", "房间已满");
     }
-    if (state.players.some((player) => player.playerId === identity.playerId)) {
+    if (room.players.some((player) => player.playerId === identity.playerId)) {
       throw new RoomRuleError("PLAYER_ALREADY_JOINED", "玩家已在房间中");
     }
     const characterId = CHARACTER_IDS.find((candidate) =>
-      !state.players.some((player) => player.characterId === candidate)
+      !room.players.some((player) => player.characterId === candidate)
     );
     if (!characterId) throw new RoomRuleError("ROOM_FULL", "房间已满");
-    return { ...state, players: [...state.players, newRoomPlayer(identity, now, characterId)] };
+    return {
+      ...room,
+      ownerId: room.ownerId ?? identity.playerId,
+      players: [...room.players, newRoomPlayer(identity, now, characterId)]
+    };
   }
 
   static selectCharacter(state: RoomState, playerId: string, characterId: CharacterId): RoomState {
@@ -624,7 +631,7 @@ function removeWaitingPlayer(state: RoomState, playerId: string): RoomState {
   return {
     ...state,
     ownerId,
-    status: players.length === 0 ? "FINISHED" : state.status,
+    status: state.status,
     players
   };
 }
