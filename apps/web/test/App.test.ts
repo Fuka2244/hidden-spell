@@ -5,6 +5,7 @@ import App from "../src/App.vue";
 describe("App", () => {
   beforeEach(() => {
     localStorage.clear();
+    FakeWebSocket.instances = [];
     vi.stubGlobal("WebSocket", FakeWebSocket);
   });
 
@@ -75,6 +76,36 @@ describe("App", () => {
     });
   });
 
+  test("HTTP 页面仍可发送准备命令", async () => {
+    vi.stubGlobal("crypto", { getRandomValues: crypto.getRandomValues.bind(crypto) });
+    localStorage.setItem("hidden-spell-session", JSON.stringify({
+      roomId: "123456", playerId: "p1", nickname: "一号", credential: "secret"
+    }));
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === "/content/manifest.json") return new Response(null, { status: 404 });
+      if (String(input).startsWith("/api/rooms/123456/session")) return Response.json({ valid: true });
+      throw new Error(`未预期的请求：${String(input)}`);
+    }));
+
+    const wrapper = mount(App);
+    await flushPromises();
+    const socket = FakeWebSocket.instances.at(-1)!;
+    socket.dispatchEvent(new MessageEvent("message", { data: JSON.stringify({
+      type: "STATE", payload: {
+        roomId: "123456", ownerId: "p1", viewerId: "p1", status: "WAITING", serverTime: 1000,
+        players: [
+          { playerId: "p1", nickname: "一号", ready: false, connected: true, characterId: "red" },
+          { playerId: "p2", nickname: "二号", ready: false, connected: true, characterId: "blue" }
+        ]
+      }
+    }) }));
+    await flushPromises();
+    await wrapper.get(".lobby-actions button.primary").trigger("click");
+    expect(socket.sent).toHaveLength(1);
+    expect(JSON.parse(socket.sent[0]!)).toMatchObject({ commandId: expect.stringMatching(/^[0-9a-f]{32}$/), type: "SET_READY", payload: { ready: true } });
+    wrapper.unmount();
+  });
+
   test("旧房间不存在时自动清除匿名身份并返回首页", async () => {
     localStorage.setItem("hidden-spell-session", JSON.stringify({
       roomId: "654321",
@@ -101,10 +132,13 @@ describe("App", () => {
 
 class FakeWebSocket extends EventTarget {
   static readonly OPEN = 1;
+  static instances: FakeWebSocket[] = [];
   readonly readyState = FakeWebSocket.OPEN;
+  readonly sent: string[] = [];
   constructor(readonly url: string) {
     super();
+    FakeWebSocket.instances.push(this);
   }
-  send(): void {}
+  send(value: string): void { this.sent.push(value); }
   close(): void {}
 }

@@ -12,10 +12,13 @@ const roomView = ref<RoomView | null>(null);
 const busy = ref(false);
 const error = ref("");
 const connected = ref(false);
+const reconnectStopped = ref(false);
 let socket: WebSocket | null = null;
 let reconnectTimer: number | undefined;
+let stableTimer: number | undefined;
 let reconnectAttempt = 0;
 let voluntarilyClosed = false;
+const MAX_RECONNECT_ATTEMPTS = 6;
 
 const screen = computed(() => {
   if (!session.value) return "landing";
@@ -30,6 +33,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   voluntarilyClosed = true;
   if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer);
+  if (stableTimer !== undefined) window.clearTimeout(stableTimer);
   socket?.close();
 });
 
@@ -55,6 +59,7 @@ async function enterRoom(url: string, nickname: string): Promise<void> {
     session.value = result;
     saveSession(result);
     reconnectAttempt = 0;
+    reconnectStopped.value = false;
     void connect();
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : "网络连接失败";
@@ -71,18 +76,34 @@ async function connect(): Promise<void> {
   if (session.value?.playerId !== identity.playerId) return;
   const scheme = location.protocol === "https:" ? "wss:" : "ws:";
   const url = `${scheme}//${location.host}/api/rooms/${identity.roomId}/socket?playerId=${encodeURIComponent(identity.playerId)}&credential=${encodeURIComponent(identity.credential)}`;
-  socket?.close();
-  socket = new WebSocket(url);
-  socket.addEventListener("open", () => {
-    reconnectAttempt = 0;
+  if (stableTimer !== undefined) window.clearTimeout(stableTimer);
+  stableTimer = undefined;
+  const previous = socket;
+  socket = null;
+  previous?.close();
+  const connection = new WebSocket(url);
+  socket = connection;
+  connection.addEventListener("open", () => {
+    if (socket !== connection) return;
     connected.value = true;
+    reconnectStopped.value = false;
     error.value = "";
+    stableTimer = window.setTimeout(() => {
+      stableTimer = undefined;
+      if (socket === connection && connected.value) reconnectAttempt = 0;
+    }, 60_000);
   });
-  socket.addEventListener("message", (event) => receive(JSON.parse(event.data as string) as ServerMessage));
-  socket.addEventListener("close", (event) => {
+  connection.addEventListener("message", (event) => {
+    if (socket === connection) receive(JSON.parse(event.data as string) as ServerMessage);
+  });
+  connection.addEventListener("close", (event) => {
+    if (socket !== connection) return;
+    if (stableTimer !== undefined) window.clearTimeout(stableTimer);
+    stableTimer = undefined;
     connected.value = false;
     if (event.code === 4001) {
       error.value = "该玩家已在另一个页面连接";
+      reconnectStopped.value = true;
       return;
     }
     if (!voluntarilyClosed && session.value) scheduleReconnect();
@@ -119,7 +140,11 @@ async function validateSession(identity: PlayerSession): Promise<boolean> {
 
 function clearExpiredSession(): void {
   voluntarilyClosed = true;
+  if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer);
+  if (stableTimer !== undefined) window.clearTimeout(stableTimer);
+  reconnectTimer = stableTimer = undefined;
   reconnectAttempt = 0;
+  reconnectStopped.value = false;
   socket?.close();
   socket = null;
   roomView.value = null;
@@ -130,6 +155,12 @@ function clearExpiredSession(): void {
 
 function scheduleReconnect(): void {
   if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer);
+  if (reconnectAttempt >= MAX_RECONNECT_ATTEMPTS) {
+    reconnectTimer = undefined;
+    reconnectStopped.value = true;
+    error.value = "多次连接失败，已停止自动重连；请稍后手动重新连接";
+    return;
+  }
   const delay = Math.min(1_500 * 2 ** reconnectAttempt, 30_000);
   reconnectAttempt += 1;
   reconnectTimer = window.setTimeout(() => {
@@ -143,6 +174,20 @@ function receive(message: ServerMessage): void {
   if (message.type === "ERROR") error.value = `${message.message}（${message.code}）`;
 }
 
+function reconnectManually(): void {
+  if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer);
+  reconnectTimer = undefined;
+  reconnectAttempt = 0;
+  reconnectStopped.value = false;
+  error.value = "";
+  void connect();
+}
+
+function createCommandId(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 function send(
   type: "SELECT_CHARACTER" | "SET_READY" | "START_GAME" | "CAST_SPELL" | "CHOOSE_SECRET" | "END_TURN" | "NEXT_ROUND" | "LEAVE_ROOM" | "SYNC",
   payload?: unknown
@@ -152,7 +197,7 @@ function send(
     return;
   }
   socket.send(JSON.stringify({
-    commandId: crypto.randomUUID(),
+    commandId: createCommandId(),
     type,
     ...(payload === undefined ? {} : { payload })
   }));
@@ -162,6 +207,9 @@ function leaveRoom(): void {
   if (!window.confirm(roomView.value?.game ? "退出将立即认输，确定吗？" : "确定退出房间吗？")) return;
   send("LEAVE_ROOM");
   voluntarilyClosed = true;
+  if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer);
+  if (stableTimer !== undefined) window.clearTimeout(stableTimer);
+  reconnectTimer = stableTimer = undefined;
   socket?.close();
   socket = null;
   roomView.value = null;
@@ -174,11 +222,16 @@ function leaveRoom(): void {
   <div class="app-frame">
     <LandingPanel v-if="screen === 'landing'" :busy="busy" :error="error" @create="createRoom" @join="joinRoom" />
     <template v-else-if="session">
+      <div v-if="roomView && error" class="connection-alert panel" role="alert">
+        <span>{{ error }}</span>
+        <button v-if="reconnectStopped" class="secondary" @click="reconnectManually">重新连接</button>
+      </div>
       <div v-if="!roomView" class="loading panel">
         <div class="rune-loader">✦</div>
         <h2>房间 {{ session.roomId }}</h2>
         <p>{{ connected ? '正在同步牌局…' : '正在连接裁决服务器…' }}</p>
         <p v-if="error" class="error">{{ error }}</p>
+        <button v-if="reconnectStopped" class="secondary" @click="reconnectManually">重新连接</button>
       </div>
       <RoomLobby
         v-else-if="screen === 'room'"
